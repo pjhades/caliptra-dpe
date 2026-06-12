@@ -90,8 +90,22 @@ pub struct Name<'a> {
     pub serial: DirectoryString<'a>,
 }
 
+#[allow(dead_code)]
+struct TciNodesInfo<'a> {
+    parent_idx: usize,
+    state: &'a State,
+}
+
+#[allow(dead_code)]
+impl TciNodesInfo<'_> {
+    pub fn is_tci_nodes_empty(&self, _handle: &ContextHandle, _locality: u32) -> bool {
+        false
+    }
+}
+
+#[allow(dead_code)]
 pub struct MeasurementData<'a> {
-    pub state: &'a State,
+    tci_nodes_info: TciNodesInfo<'a>,
     pub label: &'a [u8],
     pub tci_nodes: &'a [TciNodeData],
     pub is_ca: bool,
@@ -2860,7 +2874,10 @@ fn create_dpe_cert_or_csr(
     };
 
     let measurements = MeasurementData {
-        state,
+        tci_nodes_info: TciNodesInfo {
+            parent_idx: state.get_active_context_pos(args.handle, args.locality)?,
+            state,
+        },
         label: args.ueid,
         tci_nodes,
         is_ca,
