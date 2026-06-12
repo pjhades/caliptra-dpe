@@ -6,7 +6,7 @@
 //! this functionality for a no_std environment.
 
 use crate::{
-    context::ContextHandle,
+    context::{ChildToRootIter, ContextHandle},
     dpe_instance::DpeEnv,
     okref,
     response::DpeErrorCode,
@@ -92,14 +92,20 @@ pub struct Name<'a> {
 
 #[allow(dead_code)]
 struct TciNodesInfo<'a> {
-    parent_idx: usize,
+    start_idx: usize,
     state: &'a State,
 }
 
 #[allow(dead_code)]
 impl TciNodesInfo<'_> {
-    pub fn is_tci_nodes_empty(&self, _handle: &ContextHandle, _locality: u32) -> bool {
-        false
+    pub fn is_tci_nodes_empty(&self) -> bool {
+        ChildToRootIter::new(self.start_idx, &self.state.contexts)
+            .next()
+            .is_none()
+    }
+
+    pub fn num_tci_nodes(&self) -> usize {
+        ChildToRootIter::new(self.start_idx, &self.state.contexts).count()
     }
 }
 
@@ -2875,7 +2881,7 @@ fn create_dpe_cert_or_csr(
 
     let measurements = MeasurementData {
         tci_nodes_info: TciNodesInfo {
-            parent_idx: state.get_active_context_pos(args.handle, args.locality)?,
+            start_idx: state.get_active_context_pos(args.handle, args.locality)?,
             state,
         },
         label: args.ueid,
