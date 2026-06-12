@@ -442,7 +442,7 @@ pub trait CryptoSuite: Crypto + SignatureType + DigestType {
 
 pub trait Signer {
     /// Sign `data` with the derived private key
-    fn sign(&mut self, data: &SignData) -> Result<Signature, CryptoError>;
+    fn sign(&mut self, data: &SignData, signature: &mut Signature) -> Result<(), CryptoError>;
 
     /// Get the public key associated with the derived key-pair
     fn public_key(&mut self) -> Result<PubKey, CryptoError>;
@@ -484,8 +484,9 @@ pub trait CdiManager {
         label: &[u8],
         info: &[u8],
         data: &SignData,
-    ) -> Result<Signature, CryptoError> {
-        self.derive_key_pair(label, info)?.sign(data)
+        sig: &mut Signature,
+    ) -> Result<(), CryptoError> {
+        self.derive_key_pair(label, info)?.sign(data, sig)
     }
 
     /// Get the public key of a derived key-pair from the CDI
@@ -633,7 +634,7 @@ pub trait Crypto {
     /// # Arguments
     ///
     /// * `data` - Data to be signed.
-    fn sign_with_alias(&mut self, data: &SignData) -> Result<Signature, CryptoError>;
+    fn sign_with_alias(&mut self, data: &SignData, sig: &mut Signature) -> Result<(), CryptoError>;
 
     /// Sign `data` with a key derived from the current CDI and measurements.
     ///
@@ -651,9 +652,10 @@ pub trait Crypto {
         label: &[u8],
         derived_info: &[u8],
         data: &SignData,
-    ) -> Result<Signature, CryptoError> {
+        sig: &mut Signature,
+    ) -> Result<(), CryptoError> {
         self.derive_cdi(measurement, info)?
-            .sign_with_derived(label, derived_info, data)
+            .sign_with_derived(label, derived_info, data, sig)
     }
 
     /// Derive the public key for a key derived from the current CDI and measurements.
