@@ -150,19 +150,17 @@ pub struct RustCryptoSigner {
 }
 
 impl crate::Signer for RustCryptoSigner {
-    fn sign(&mut self, data: &SignData) -> Result<super::Signature, CryptoError> {
+    fn sign(&mut self, data: &SignData, sig: &mut super::Signature) -> Result<(), CryptoError> {
         match self.signature_alg {
             SignatureAlgorithm::Ecdsa(EcdsaAlgorithm::Bit256) => {
                 let signing = p256::ecdsa::SigningKey::from_slice(self.priv_key.as_slice())?;
-                let sig =
-                    RustCryptoImpl::ecdsa_sign_data_inner(&signing, data, self.signature_alg)?;
-                Ok(EcdsaSig::from(sig).into())
+                RustCryptoImpl::ecdsa_sign_data_inner(&signing, data, self.signature_alg, sig)?;
+                Ok(())
             }
             SignatureAlgorithm::Ecdsa(EcdsaAlgorithm::Bit384) => {
                 let signing = p384::ecdsa::SigningKey::from_slice(self.priv_key.as_slice())?;
-                let sig =
-                    RustCryptoImpl::ecdsa_sign_data_inner(&signing, data, self.signature_alg)?;
-                Ok(EcdsaSig::from(sig).into())
+                RustCryptoImpl::ecdsa_sign_data_inner(&signing, data, self.signature_alg, sig)?;
+                Ok(())
             }
             #[cfg(feature = "ml-dsa")]
             SignatureAlgorithm::Mldsa(MldsaAlgorithm::Mldsa87) => {
@@ -172,7 +170,7 @@ impl crate::Signer for RustCryptoSigner {
                         .try_into()
                         .map_err(|_| RUSTCRYPTO_ML_DSA_ERROR)?,
                 );
-                RustCryptoImpl::mldsa_sign_data_inner(&kp, data)
+                RustCryptoImpl::mldsa_sign_data_inner(&kp, data, sig)
             }
         }
     }
@@ -351,13 +349,18 @@ impl RustCryptoImpl {
         )
     }
 
-    fn ecdsa_sign_data_inner<C: PrimeCurve>(
+    fn ecdsa_sign_data_inner<C: PrimeCurve, const K: usize>(
         key: &dyn PrehashSigner<Signature<C>>,
         data: &SignData,
         alg: SignatureAlgorithm,
-    ) -> Result<Signature<C>, CryptoError> {
-        match data {
-            SignData::Digest(dig) => Ok(key.sign_prehash(dig.as_slice())?),
+        sig: &mut super::Signature,
+    ) -> Result<(), CryptoError>
+    where
+        EcdsaSig<K>: From<Signature<C>>,
+        super::Signature: From<EcdsaSig<K>>,
+    {
+        let s = match data {
+            SignData::Digest(dig) => key.sign_prehash(dig.as_slice())?,
             SignData::Raw(raw) => {
                 let digest_bytes = match alg {
                     SignatureAlgorithm::Ecdsa(EcdsaAlgorithm::Bit256) => {
@@ -371,26 +374,28 @@ impl RustCryptoImpl {
                     #[allow(unreachable_patterns)]
                     _ => return Err(CryptoError::MismatchedAlgorithm),
                 };
-                Ok(key.sign_prehash(&digest_bytes)?)
+                key.sign_prehash(&digest_bytes)?
             }
-            _ => Err(CryptoError::MismatchedAlgorithm),
-        }
+            _ => Err(CryptoError::MismatchedAlgorithm)?,
+        };
+        *sig = EcdsaSig::from(s).into();
+        Ok(())
     }
 
     #[cfg(feature = "ml-dsa")]
     fn mldsa_sign_data_inner(
         key: &SigningKey<MlDsa87>,
         data: &SignData,
-    ) -> Result<super::Signature, CryptoError> {
-        let sig = match data {
+        sig: &mut super::Signature,
+    ) -> Result<(), CryptoError> {
+        let s = match data {
             SignData::Mu(mu) => key.signing_key().sign_mu_deterministic((&mu.0).into()),
             SignData::Raw(raw) => key.sign(raw),
             SignData::Digest(_) => return Err(CryptoError::MismatchedAlgorithm),
         };
-        let sig = sig.encode();
-        Ok(super::Signature::Mldsa(MldsaSignature::read_from_bytes(
-            sig.as_slice(),
-        )?))
+        let s = s.encode();
+        *sig = super::Signature::Mldsa(MldsaSignature::read_from_bytes(s.as_slice())?);
+        Ok(())
     }
 }
 
@@ -459,24 +464,28 @@ impl Crypto for RustCryptoImpl {
         Err(CryptoError::InvalidExportedCdiHandle)
     }
 
-    fn sign_with_alias(&mut self, data: &SignData) -> Result<super::Signature, CryptoError> {
+    fn sign_with_alias(
+        &mut self,
+        data: &SignData,
+        sig: &mut super::Signature,
+    ) -> Result<(), CryptoError> {
         use crate::artifacts;
         match self.signature_alg {
             SignatureAlgorithm::Ecdsa(EcdsaAlgorithm::Bit256) => {
                 let signing_key = p256::ecdsa::SigningKey::from_sec1_pem(artifacts::KEY_P256_PEM)?;
-                let sig = Self::ecdsa_sign_data_inner(&signing_key, data, self.signature_alg)?;
-                Ok(EcdsaSig::from(sig).into())
+                Self::ecdsa_sign_data_inner(&signing_key, data, self.signature_alg, sig)?;
+                Ok(())
             }
             SignatureAlgorithm::Ecdsa(EcdsaAlgorithm::Bit384) => {
                 let signing_key = p384::ecdsa::SigningKey::from_sec1_pem(artifacts::KEY_P384_PEM)?;
-                let sig = Self::ecdsa_sign_data_inner(&signing_key, data, self.signature_alg)?;
-                Ok(EcdsaSig::from(sig).into())
+                Self::ecdsa_sign_data_inner(&signing_key, data, self.signature_alg, sig)?;
+                Ok(())
             }
             #[cfg(feature = "ml-dsa")]
             SignatureAlgorithm::Mldsa(MldsaAlgorithm::Mldsa87) => {
                 let ml_dsa_secret =
                     SigningKey::<MlDsa87>::from_pkcs8_pem(artifacts::KEY_MLDSA_87_PEM)?;
-                Self::mldsa_sign_data_inner(&ml_dsa_secret, data)
+                Self::mldsa_sign_data_inner(&ml_dsa_secret, data, sig)
             }
         }
     }

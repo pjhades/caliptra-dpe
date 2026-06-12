@@ -3,7 +3,7 @@ use super::CommandExecution;
 use crate::{
     context::{ContextHandle, ContextType},
     dpe_instance::{DpeEnv, DpeInstance},
-    mutresp, okref,
+    mutresp,
     response::DpeErrorCode,
     DpeProfile,
 };
@@ -13,8 +13,11 @@ use caliptra_cfi_derive::cfi_impl_fn;
 use caliptra_cfi_lib::cfi_launder;
 #[cfg(feature = "cfi")]
 use caliptra_cfi_lib::{cfi_assert, cfi_assert_bool, cfi_assert_ne};
-#[cfg(any(feature = "p256", feature = "p384"))]
-use caliptra_dpe_crypto::ecdsa::EcdsaSignature;
+use caliptra_dpe_crypto::ecdsa::{
+    curve_256::EcdsaSignature256, curve_384::EcdsaSignature384, EcdsaSignature,
+};
+#[cfg(feature = "ml-dsa")]
+use caliptra_dpe_crypto::ml_dsa::{MldsaAlgorithm, MldsaSignature};
 use caliptra_dpe_crypto::{SignData, Signature};
 use cfg_if::cfg_if;
 #[cfg(feature = "ml-dsa")]
@@ -189,8 +192,21 @@ impl CommandExecution for SignCommand<'_> {
             }
         }
 
-        let sig = sign(dpe, env, idx, label, &data);
-        match okref(&sig)? {
+        let mut sig = match dpe.profile {
+            DpeProfile::P256Sha256 => {
+                Signature::Ecdsa(EcdsaSignature::Ecdsa256(EcdsaSignature256::default()))
+            }
+            DpeProfile::P384Sha384 => {
+                Signature::Ecdsa(EcdsaSignature::Ecdsa384(EcdsaSignature384::default()))
+            }
+            #[cfg(feature = "ml-dsa")]
+            DpeProfile::Mldsa87 => Signature::Mldsa(MldsaSignature(
+                [0u8; MldsaAlgorithm::Mldsa87.signature_size()],
+            )),
+        };
+
+        sign(dpe, env, idx, label, &data, &mut sig)?;
+        match &sig {
             #[cfg(feature = "p256")]
             Signature::Ecdsa(EcdsaSignature::Ecdsa256(sig)) => {
                 use crate::response::SignP256Resp;
@@ -263,7 +279,8 @@ fn sign(
     idx: usize,
     label: &[u8],
     data: &SignData,
-) -> Result<Signature, DpeErrorCode> {
+    sig: &mut Signature,
+) -> Result<(), DpeErrorCode> {
     let cdi_digest = dpe.compute_measurement_hash(env, idx)?;
     let cdi = env.crypto().derive_cdi(&cdi_digest, b"DPE")?;
     let profile = dpe.profile;
@@ -277,7 +294,7 @@ fn sign(
         cfi_assert!(key_pair.is_err());
     }
     let signer = key_pair?;
-    Ok(signer.sign(data)?)
+    Ok(signer.sign(data, sig)?)
 }
 
 #[repr(C, align(4))]
