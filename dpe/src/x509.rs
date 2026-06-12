@@ -91,6 +91,7 @@ pub struct Name<'a> {
 }
 
 pub struct MeasurementData<'a> {
+    pub state: &'a State,
     pub label: &'a [u8],
     pub tci_nodes: &'a [TciNodeData],
     pub is_ca: bool,
@@ -2859,6 +2860,7 @@ fn create_dpe_cert_or_csr(
     };
 
     let measurements = MeasurementData {
+        state,
         label: args.ueid,
         tci_nodes,
         is_ca,
