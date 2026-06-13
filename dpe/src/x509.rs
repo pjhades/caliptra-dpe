@@ -97,15 +97,35 @@ struct TciNodesInfo<'a> {
 }
 
 #[allow(dead_code)]
-impl TciNodesInfo<'_> {
-    pub fn is_tci_nodes_empty(&self) -> bool {
+impl<'a> TciNodesInfo<'a> {
+    fn new(start_idx: usize, state: &'a State) -> Result<Self, DpeErrorCode> {
+        let tci_nodes_info = Self { start_idx, state };
+        if tci_nodes_info.iter().count() > MAX_HANDLES {
+            Err(DpeErrorCode::InternalError)
+        } else {
+            Ok(tci_nodes_info)
+        }
+    }
+
+    fn iter(&self) -> ChildToRootIter {
         ChildToRootIter::new(self.start_idx, &self.state.contexts)
-            .next()
-            .is_none()
+    }
+
+    pub fn is_tci_nodes_empty(&self) -> bool {
+        self.iter().next().is_none()
     }
 
     pub fn num_tci_nodes(&self) -> usize {
-        ChildToRootIter::new(self.start_idx, &self.state.contexts).count()
+        self.iter().count()
+    }
+
+    pub fn first_tci_node(&self) -> Result<Option<&TciNodeData>, DpeErrorCode> {
+        let mut iter = self.iter();
+        let mut prev = iter.next().transpose()?;
+        for node in self.iter() {
+            prev = Some(node?);
+        }
+        Ok(prev.map(|context| &context.tci))
     }
 }
 
@@ -2880,10 +2900,10 @@ fn create_dpe_cert_or_csr(
     };
 
     let measurements = MeasurementData {
-        tci_nodes_info: TciNodesInfo {
-            start_idx: state.get_active_context_pos(args.handle, args.locality)?,
+        tci_nodes_info: TciNodesInfo::new(
+            state.get_active_context_pos(args.handle, args.locality)?,
             state,
-        },
+        )?,
         label: args.ueid,
         tci_nodes,
         is_ca,
