@@ -8,13 +8,19 @@ use crate::{
     response::{DeriveContextExportedCdiResp, DeriveContextResp, DpeErrorCode},
     tci::TciMeasurement,
     x509::{create_exported_dpe_cert, CreateDpeCertArgs, CreateDpeCertResult},
-    DpeFlags, State,
+    DpeFlags, DpeProfile, State,
 };
 use bitflags::bitflags;
 #[cfg(feature = "cfi")]
 use caliptra_cfi_derive::cfi_impl_fn;
 #[cfg(feature = "cfi")]
 use caliptra_cfi_lib::{cfi_assert, cfi_assert_bool, cfi_assert_eq};
+#[cfg(feature = "ml-dsa")]
+use caliptra_dpe_crypto::ml_dsa::{MldsaAlgorithm, MldsaPublicKey};
+use caliptra_dpe_crypto::{
+    ecdsa::{curve_256::EcdsaPub256, curve_384::EcdsaPub384, EcdsaPubKey},
+    PubKey,
+};
 use cfg_if::cfg_if;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
@@ -374,10 +380,17 @@ impl CommandExecution for DeriveContextCmd {
                         ueid,
                         dice_extensions_are_critical: env.state().flags.contains(DpeFlags::MARK_DICE_EXTENSIONS_CRITICAL),
                     };
+                    let mut pub_key = match dpe.profile {
+                        DpeProfile::P256Sha256 => PubKey::Ecdsa(EcdsaPubKey::Ecdsa256(EcdsaPub256::default())),
+                        DpeProfile::P384Sha384 => PubKey::Ecdsa(EcdsaPubKey::Ecdsa384(EcdsaPub384::default())),
+                        #[cfg(feature = "ml-dsa")]
+                        DpeProfile::Mldsa87 => PubKey::Mldsa(MldsaPublicKey([0u8;MldsaAlgorithm::Mldsa87.public_key_size()])),
+                    };
                     let result = create_exported_dpe_cert(
                         &args,
                         dpe,
                         env,
+                        &mut pub_key,
                         &mut response.new_certificate,
                     );
                     let CreateDpeCertResult { cert_size, exported_cdi_handle, .. } = okref(&result)?;

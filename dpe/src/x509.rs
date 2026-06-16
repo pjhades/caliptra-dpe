@@ -2687,12 +2687,14 @@ pub(crate) fn create_exported_dpe_cert(
     args: &CreateDpeCertArgs,
     dpe: &mut DpeInstance,
     env: &mut dyn DpeEnv,
+    pub_key: &mut PubKey,
     cert: &mut [u8],
 ) -> Result<CreateDpeCertResult, DpeErrorCode> {
     create_dpe_cert_or_csr(
         args,
         dpe,
         env,
+        pub_key,
         CertificateFormat::X509,
         CertificateType::Exported,
         cert,
@@ -2703,12 +2705,14 @@ pub(crate) fn create_dpe_cert(
     args: &CreateDpeCertArgs,
     dpe: &mut DpeInstance,
     env: &mut dyn DpeEnv,
+    pub_key: &mut PubKey,
     cert: &mut [u8],
 ) -> Result<CreateDpeCertResult, DpeErrorCode> {
     create_dpe_cert_or_csr(
         args,
         dpe,
         env,
+        pub_key,
         CertificateFormat::X509,
         CertificateType::Leaf,
         cert,
@@ -2720,12 +2724,14 @@ pub(crate) fn create_dpe_csr(
     args: &CreateDpeCertArgs,
     dpe: &mut DpeInstance,
     env: &mut dyn DpeEnv,
+    pub_key: &mut PubKey,
     csr: &mut [u8],
 ) -> Result<CreateDpeCertResult, DpeErrorCode> {
     create_dpe_cert_or_csr(
         args,
         dpe,
         env,
+        pub_key,
         CertificateFormat::Csr,
         CertificateType::Leaf,
         csr,
@@ -2830,6 +2836,7 @@ fn create_dpe_cert_or_csr(
     args: &CreateDpeCertArgs,
     dpe: &mut DpeInstance,
     env: &mut dyn DpeEnv,
+    pub_key: &mut PubKey,
     cert_format: CertificateFormat,
     cert_type: CertificateType,
     output_cert_or_csr: &mut [u8],
@@ -2839,26 +2846,30 @@ fn create_dpe_cert_or_csr(
 
     let mut exported_cdi_handle = None;
 
-    let pub_key = match cert_type {
+    let result = match cert_type {
         CertificateType::Exported => {
             let exported_handle = crypto.derive_exported_cdi(&digest, args.cdi_label)?;
             exported_cdi_handle = Some(exported_handle);
             crypto
                 .derive_key_pair_exported(&exported_handle, args.key_label, args.context)?
-                .public_key()
+                .public_key(pub_key)
         }
-        CertificateType::Leaf => {
-            crypto.derive_pub_key(&digest, args.cdi_label, args.key_label, args.context)
-        }
+        CertificateType::Leaf => crypto.derive_pub_key(
+            &digest,
+            args.cdi_label,
+            args.key_label,
+            args.context,
+            pub_key,
+        ),
     };
-    if cfi_launder(pub_key.is_ok()) {
+    if cfi_launder(result.is_ok()) {
         #[cfg(feature = "cfi")]
-        cfi_assert!(pub_key.is_ok());
+        cfi_assert!(result.is_ok());
     } else {
         #[cfg(feature = "cfi")]
-        cfi_assert!(pub_key.is_err());
+        cfi_assert!(result.is_err());
     }
-    let pub_key = okref(&pub_key)?;
+    result.map_err(|e| DpeErrorCode::Crypto(e))?;
     let mut subj_serial = [0u8; MAX_HASH_SIZE * 2];
     let subject_name = get_subject_name(crypto, &cert_type, pub_key, &mut subj_serial)?;
 

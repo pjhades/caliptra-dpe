@@ -13,8 +13,14 @@ use bitflags::bitflags;
 use caliptra_cfi_derive::cfi_impl_fn;
 #[cfg(feature = "cfi")]
 use caliptra_cfi_lib::{cfi_assert, cfi_assert_bool, cfi_assert_eq};
+#[cfg(feature = "p256")]
+use caliptra_dpe_crypto::ecdsa::curve_256::EcdsaPub256;
+#[cfg(feature = "p384")]
+use caliptra_dpe_crypto::ecdsa::curve_384::EcdsaPub384;
 #[cfg(any(feature = "p256", feature = "p384"))]
 use caliptra_dpe_crypto::ecdsa::EcdsaPubKey;
+#[cfg(feature = "ml-dsa")]
+use caliptra_dpe_crypto::ml_dsa::{MldsaAlgorithm, MldsaPublicKey};
 use caliptra_dpe_crypto::PubKey;
 use cfg_if::cfg_if;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
@@ -195,7 +201,17 @@ impl CommandExecution for CertifyKeyCommand<'_> {
                 .flags
                 .contains(DpeFlags::MARK_DICE_EXTENSIONS_CRITICAL),
         };
-
+        let mut pub_key = match profile {
+            #[cfg(feature = "p256")]
+            DpeProfile::P256Sha256 => PubKey::Ecdsa(EcdsaPubKey::Ecdsa256(EcdsaPub256::default())),
+            #[cfg(feature = "p384")]
+            DpeProfile::P384Sha384 => PubKey::Ecdsa(EcdsaPubKey::Ecdsa384(EcdsaPub384::default())),
+            #[cfg(feature = "ml-dsa")]
+            DpeProfile::Mldsa87 => PubKey::Mldsa(MldsaPublicKey(
+                [0u8; MldsaAlgorithm::Mldsa87.public_key_size()],
+            )),
+            _ => return Err(DpeErrorCode::InvalidArgument),
+        };
         let mut response = self.response_bytes(dpe.profile, out)?;
         let cert = response.cert_mut();
 
@@ -205,7 +221,7 @@ impl CommandExecution for CertifyKeyCommand<'_> {
                     if #[cfg(not(feature = "disable_x509"))] {
                         #[cfg(feature = "cfi")]
                         cfi_assert_eq(format, Self::FORMAT_X509);
-                        create_dpe_cert(&args, dpe, env, cert)
+                        create_dpe_cert(&args, dpe, env, &mut pub_key, cert)
                     } else {
                         Err(DpeErrorCode::ArgumentNotSupported)
                     }
@@ -216,7 +232,7 @@ impl CommandExecution for CertifyKeyCommand<'_> {
                     if #[cfg(not(feature = "disable_csr"))] {
                         #[cfg(feature = "cfi")]
                         cfi_assert_eq(format, Self::FORMAT_CSR);
-                        crate::x509::create_dpe_csr(&args, dpe, env, cert)
+                        crate::x509::create_dpe_csr(&args, dpe, env, &mut pub_key, cert)
                     } else {
                         Err(DpeErrorCode::ArgumentNotSupported)
                     }

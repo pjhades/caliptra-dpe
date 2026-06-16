@@ -445,7 +445,7 @@ pub trait Signer {
     fn sign(&mut self, data: &SignData) -> Result<Signature, CryptoError>;
 
     /// Get the public key associated with the derived key-pair
-    fn public_key(&mut self) -> Result<PubKey, CryptoError>;
+    fn public_key(&mut self, pub_key: &mut PubKey) -> Result<(), CryptoError>;
 }
 
 pub trait CdiManager {
@@ -494,8 +494,13 @@ pub trait CdiManager {
     ///
     /// * `label` - Caller-supplied label to use in asymmetric key derivation
     /// * `info` - Caller-supplied info string to use in asymmetric key derivation
-    fn derive_pub_key(&mut self, label: &[u8], info: &[u8]) -> Result<PubKey, CryptoError> {
-        self.derive_key_pair(label, info)?.public_key()
+    fn derive_pub_key(
+        &mut self,
+        label: &[u8],
+        info: &[u8],
+        pub_key: &mut PubKey,
+    ) -> Result<(), CryptoError> {
+        self.derive_key_pair(label, info)?.public_key(pub_key)
     }
 
     /// This should only be used in testing
@@ -670,8 +675,9 @@ pub trait Crypto {
         info: &[u8],
         label: &[u8],
         derived_info: &[u8],
-    ) -> Result<PubKey, CryptoError> {
+        pub_key: &mut PubKey,
+    ) -> Result<(), CryptoError> {
         self.derive_cdi(measurement, info)?
-            .derive_pub_key(label, derived_info)
+            .derive_pub_key(label, derived_info, pub_key)
     }
 }
