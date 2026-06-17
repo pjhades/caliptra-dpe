@@ -498,3 +498,79 @@ pub struct GetCertificateChainResp {
     pub certificate_size: u32,
     pub certificate_chain: [u8; MAX_CHUNK_SIZE],
 }
+
+/// A trait allowing for reading data out of a source at an offset. The major purpose of this trait
+/// is to support reading a chunk of the partially written DPE response from Caliptra's mailbox SRAM.
+/// Implementers of this trait can then customize the reading behavior to enforce, for example,
+/// alignments.
+pub trait RespBufRead {
+    /// Try to read into `data` from `self` at `offset` and fill `data`.
+    fn read_at(&self, data: &mut [u8], offset: usize) -> Result<(), DpeErrorCode>;
+}
+
+/// A trait allowing for writing data into a destination at an offset. The major purpose of this
+/// trait is to support streaming a DPE response directly to Caliptra's mailbox SRAM. Implementers
+/// of this trait can then customize the writing behavior to enforce, for example, alignments.
+pub trait RespBufWrite {
+    /// Try to write the content of `data` to `self` at `offset`.
+    fn write_at(&mut self, data: &[u8], offset: usize) -> Result<(), DpeErrorCode>;
+}
+
+impl RespBufRead for &[u8] {
+    fn read_at(&self, data: &mut [u8], offset: usize) -> Result<(), DpeErrorCode> {
+        if offset > self.len() || self.len() - offset < data.len() {
+            return Err(DpeErrorCode::InvalidResponseBuf);
+        }
+        data.copy_from_slice(&self[offset..offset + data.len()]);
+        Ok(())
+    }
+}
+
+impl RespBufWrite for &mut [u8] {
+    fn write_at(&mut self, data: &[u8], offset: usize) -> Result<(), DpeErrorCode> {
+        if offset > self.len() || self.len() - offset < data.len() {
+            return Err(DpeErrorCode::InvalidResponseBuf);
+        }
+        (&mut self[offset..offset + data.len()]).copy_from_slice(data);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SIZE: usize = 1024;
+
+    #[test]
+    fn read_write_u8_slice() {
+        let mut buf = [0u8; SIZE];
+        const DATA: u64 = 0xdeadbeef_c01dcafe;
+
+        let result = buf
+            .as_mut_slice()
+            .write_at(DATA.to_le_bytes().as_slice(), 42);
+        assert!(result.is_ok());
+
+        let mut data = [0u8; 8];
+
+        let result = buf.as_slice().read_at(data.as_mut_slice(), 42);
+        assert!(result.is_ok());
+        assert_eq!(u64::from_le_bytes(data), DATA);
+
+        let result = buf.as_slice().read_at(data.as_mut_slice(), SIZE * 2);
+        assert_eq!(result, Err(DpeErrorCode::InvalidResponseBuf));
+
+        let mut big_data = [0u8; SIZE * 2];
+        let result = buf.as_slice().read_at(big_data.as_mut_slice(), 0);
+        assert_eq!(result, Err(DpeErrorCode::InvalidResponseBuf));
+
+        let result = buf
+            .as_mut_slice()
+            .write_at(DATA.to_le_bytes().as_slice(), SIZE * 2);
+        assert_eq!(result, Err(DpeErrorCode::InvalidResponseBuf));
+
+        let result = buf.as_mut_slice().write_at(big_data.as_slice(), 0);
+        assert_eq!(result, Err(DpeErrorCode::InvalidResponseBuf));
+    }
+}
